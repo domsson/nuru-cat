@@ -11,11 +11,9 @@
 #include <signal.h>     // sigaction(), struct sigaction
 #include <termios.h>    // struct winsize, struct termios, tcgetattr(), ...
 #include <sys/ioctl.h>  // ioctl(), TIOCGWINSZ
-
 #include <locale.h>     // setlocale(), LC_CTYPE
 #include <wchar.h>      // fwide(), wchar_t
-
-#include "nuru.h"
+#include "nuru.h"       // nuru minimal reference implementation
 
 // program information
 
@@ -71,11 +69,11 @@ parse_args(int argc, char **argv, options_s *opts)
 			case 'f':
 				opts->fg = 1;
 				break;
-			case 'p':
-				opts->pal_file = optarg;
-				break;
 			case 'h':
 				opts->help = 1;
+				break;
+			case 'p':
+				opts->pal_file = optarg;
 				break;
 			case 'V':
 				opts->version = 1;
@@ -98,6 +96,7 @@ help(const char *invocation, FILE *where)
 	fprintf(where, "\t%s [OPTIONS...]\n\n", invocation);
 	fprintf(where, "OPTIONS\n");
 	fprintf(where, "\t-h\tprint this help text and exit\n");
+	fprintf(where, "\t-p FILE\t palette file to use\n");
 	fprintf(where, "\t-V\tprint version information and exit\n");
 }
 
@@ -112,25 +111,13 @@ version(FILE *where)
 			PROGRAM_URL);
 }
 
-static void
-color_fg(uint8_t color)
-{
-	wprintf(L"\x1b[38;5;%hhum", color);
-}
-
-static void
-color_bg(uint8_t color)
-{
-	wprintf(L"\x1b[48;5;%hhum", color);
-}
-
 /*
  * Try to figure out the terminal size, in character cells, and return that 
  * info in the given winsize structure. Returns 0 on succes, -1 on error.
  * However, you might still want to check if the ws_col and ws_row fields 
  * actually contain values other than 0. They should. But who knows.
  */
-int
+static int
 term_wsize(struct winsize *ws)
 {
 #ifndef TIOCGWINSZ
@@ -196,7 +183,19 @@ term_reset()
 	//setvbuf(stdout, NULL, _IOLBF, 0);
 }
 
-int
+static void
+color_fg(uint8_t color)
+{
+	wprintf(L"\x1b[38;5;%hhum", color);
+}
+
+static void
+color_bg(uint8_t color)
+{
+	wprintf(L"\x1b[48;5;%hhum", color);
+}
+
+static int
 print_nui(nuru_img_s *img, nuru_pal_s *pal, uint16_t cols, uint16_t rows)
 {
 	nuru_cell_s *cell = NULL;
@@ -206,18 +205,23 @@ print_nui(nuru_img_s *img, nuru_pal_s *pal, uint16_t cols, uint16_t rows)
 		for (uint16_t c = 0; c < img->cols; ++c)
 		{
 			cell = nuru_get_cell(img, c, r);
-			color_fg(cell->fg);
-			color_bg(cell->bg);
+			if (cell->fg != img->fg)
+			{
+				color_fg(cell->fg);
+			}
+			if (cell->bg != img->bg)
+			{
+				color_bg(cell->bg);
+			}
 			wchar_t ch = pal ? pal->codepoints[cell->ch] : cell->ch;
 			fputwc(ch, stdout);
+			fputws(ANSI_FONT_RESET, stdout);
 		}	
-		fputws(ANSI_FONT_RESET, stdout);
 		fputwc('\n', stdout);
 	}
 	
 	return -1;
 }
-
 
 int
 main(int argc, char **argv)
@@ -299,7 +303,7 @@ main(int argc, char **argv)
 
 	// display nuru image
 	term_setup(&opts);
-	//term_clear();
+	term_clear();
 	print_nui(&nui, opts.pal_file ? &nup : NULL, ws.ws_col, ws.ws_row);
 
 	// clean up and cya 
