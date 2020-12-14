@@ -24,8 +24,8 @@ You can compile it with the provided `build` script.
 
 Options:
 
-  - `-b`: custom background color
-  - `-f`: custom foreground color
+  - `-b`: custom background color (not yet implemented)
+  - `-f`: custom foreground color (not yet implemented)
   - `-h`: print help text and exit
   - `-p FILE`: palette file to use
   - `-V`: print version information and exit
