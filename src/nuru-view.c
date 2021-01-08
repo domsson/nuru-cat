@@ -44,6 +44,7 @@ typedef struct options
 {
 	char *img_file;        // nuru image file to load
 	char *pal_file;        // nuru palette file to load
+	uint8_t info;          // print image info and exit
 	uint8_t fg;            // custom foreground colors
 	uint8_t bg;            // custom background color
 	uint8_t help : 1;      // show help and exit
@@ -59,7 +60,7 @@ parse_args(int argc, char **argv, options_s *opts)
 {
 	opterr = 0;
 	int o;
-	while ((o = getopt(argc, argv, "b:f:p:hV")) != -1)
+	while ((o = getopt(argc, argv, "b:f:ip:hV")) != -1)
 	{
 		switch (o)
 		{
@@ -71,6 +72,9 @@ parse_args(int argc, char **argv, options_s *opts)
 				break;
 			case 'h':
 				opts->help = 1;
+				break;
+			case 'i':
+				opts->info = 1;
 				break;
 			case 'p':
 				opts->pal_file = optarg;
@@ -205,11 +209,11 @@ print_nui(nuru_img_s *img, nuru_pal_s *pal, uint16_t cols, uint16_t rows)
 		for (uint16_t c = 0; c < img->cols; ++c)
 		{
 			cell = nuru_get_cell(img, c, r);
-			if (cell->fg != img->fg)
+			if (cell->fg != img->fg_key)
 			{
 				color_fg(cell->fg);
 			}
-			if (cell->bg != img->bg)
+			if (cell->bg != img->bg_key)
 			{
 				color_bg(cell->bg);
 			}
@@ -223,17 +227,25 @@ print_nui(nuru_img_s *img, nuru_pal_s *pal, uint16_t cols, uint16_t rows)
 	return -1;
 }
 
+void
+info(nuru_img_s *img)
+{
+	fprintf(stdout, "signature:  %s\n", img->signature);
+	fprintf(stdout, "version:    %d\n", img->version);
+	fprintf(stdout, "color_mode: %d\n", img->color_mode);
+	fprintf(stdout, "glpyh_mode: %d\n", img->glyph_mode);
+	fprintf(stdout, "mdata_mode: %d\n", img->mdata_mode);
+	fprintf(stdout, "cols:       %d\n", img->cols);
+	fprintf(stdout, "rows:       %d\n", img->rows);
+	fprintf(stdout, "fg_key:     %d\n", img->fg_key);
+	fprintf(stdout, "bg_key:     %d\n", img->bg_key);
+	fprintf(stdout, "glyph_pal:  %s\n", img->glyph_pal);
+	fprintf(stdout, "color_pal:  %s\n", img->color_pal);
+}
+
 int
 main(int argc, char **argv)
 {
-	// ensure unicode / wide-character support
-	setlocale(LC_CTYPE, "");
-	if (fwide(stdout, 1) != 1)
-	{
-		fprintf(stderr, "Couldn't put terminal in wide-character mode\n");
-		return EXIT_FAILURE;
-	}
-
 	// parse command line options
 	options_s opts = { 0 };
 	parse_args(argc, argv, &opts);
@@ -253,6 +265,32 @@ main(int argc, char **argv)
 	if (opts.img_file == NULL)
 	{
 		fprintf(stderr, "No image file given\n");
+		return EXIT_FAILURE;
+	}
+
+	// load nuru image file
+	nuru_img_s nui = { 0 };
+	if (nuru_img_load(&nui, opts.img_file) == -1)
+	{
+		fprintf(stderr, "Error loading image file: %s\n", opts.img_file);
+		return EXIT_FAILURE;
+	}
+
+	if (opts.info)
+	{
+		info(&nui);
+		return EXIT_SUCCESS;
+	}
+
+	// load nuru palette file
+	nuru_pal_s nup = { 0 };
+	if (opts.pal_file)
+	{
+		if (nuru_pal_load(&nup, opts.pal_file) == -1)
+		{
+			fprintf(stderr, "Error loading palette file: %s\n", opts.pal_file);
+			return EXIT_FAILURE;
+		}
 	}
 
 	// get the terminal dimensions
@@ -269,37 +307,13 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	// load nuru image file
-	nuru_img_s nui = { 0 };
-	if (nuru_img_load(&nui, opts.img_file) == -1)
+	// ensure unicode / wide-character support
+	setlocale(LC_CTYPE, "");
+	if (fwide(stdout, 1) != 1)
 	{
-		fprintf(stderr, "Error loading image file: %s\n", opts.img_file);
+		fprintf(stderr, "Couldn't put terminal in wide-character mode\n");
 		return EXIT_FAILURE;
 	}
-
-	nuru_pal_s nup = { 0 };
-	if (opts.pal_file)
-	{
-		if (nuru_pal_load(&nup, opts.pal_file) == -1)
-		{
-			fprintf(stderr, "Error loading palette file: %s\n", opts.pal_file);
-			return EXIT_FAILURE;
-		}
-	}
-
-	/*
-	fprintf(stderr, "signature: %s\n", nui.signature);
-	fprintf(stderr, "version:   %d\n", nui.version);
-	fprintf(stderr, "colors: %d\n", nui.color_mode);
-	fprintf(stderr, "glpyhs: %d\n", nui.glyph_mode);
-	fprintf(stderr, "meta:   %d\n", nui.meta_mode);
-	fprintf(stderr, "width:  %d\n", nui.width);
-	fprintf(stderr, "height: %d\n", nui.height);
-	fprintf(stderr, "fg key: %d\n", nui.fg);
-	fprintf(stderr, "bg key: %d\n", nui.bg);
-	fprintf(stderr, "palette: %s\n", nui.palette);
-	fprintf(stderr, "comment: %s\n", nui.comment);
-	*/
 
 	// display nuru image
 	term_setup(&opts);
