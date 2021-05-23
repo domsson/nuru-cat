@@ -17,8 +17,8 @@
 
 // program information
 
-#define PROGRAM_NAME "nuru-view"
-#define PROGRAM_URL  "https://github.com/domsson/nuru-view"
+#define PROGRAM_NAME "nuru-cat"
+#define PROGRAM_URL  "https://github.com/domsson/nuru-cat"
 
 #define PROGRAM_VER_MAJOR 0
 #define PROGRAM_VER_MINOR 0
@@ -42,10 +42,11 @@
 
 typedef struct options
 {
-	char *img_file;        // nuru image file to load
-	char *pal_file;        // nuru palette file to load
+	char *nui_file;        // nuru image file to load
+	char *nug_file;        // nuru glyph palette file to load
+	char *nuc_file;        // nuru color palette file to load
 	uint8_t info;          // print image info and exit
-	uint8_t fg;            // custom foreground colors
+	uint8_t fg;            // custom foreground color
 	uint8_t bg;            // custom background color
 	uint8_t help : 1;      // show help and exit
 	uint8_t version : 1;   // show version and exit
@@ -60,24 +61,27 @@ parse_args(int argc, char **argv, options_s *opts)
 {
 	opterr = 0;
 	int o;
-	while ((o = getopt(argc, argv, "b:f:ip:hV")) != -1)
+	while ((o = getopt(argc, argv, "b:c:f:g:ihV")) != -1)
 	{
 		switch (o)
 		{
 			case 'b':
 				opts->bg = 1;
 				break;
+			case 'c':
+				opts->nuc_file = optarg;
+				break;
 			case 'f':
 				opts->fg = 1;
+				break;
+			case 'g':
+				opts->nug_file = optarg;
 				break;
 			case 'h':
 				opts->help = 1;
 				break;
 			case 'i':
 				opts->info = 1;
-				break;
-			case 'p':
-				opts->pal_file = optarg;
 				break;
 			case 'V':
 				opts->version = 1;
@@ -86,7 +90,7 @@ parse_args(int argc, char **argv, options_s *opts)
 	}
 	if (optind < argc)
 	{
-		opts->img_file = argv[optind];
+		opts->nui_file = argv[optind];
 	}
 }
 
@@ -97,7 +101,7 @@ static void
 help(const char *invocation, FILE *where)
 {
 	fprintf(where, "USAGE\n");
-	fprintf(where, "\t%s [OPTIONS...]\n\n", invocation);
+	fprintf(where, "\t%s [OPTIONS...] image_file\n\n", invocation);
 	fprintf(where, "OPTIONS\n");
 	fprintf(where, "\t-h\tprint this help text and exit\n");
 	fprintf(where, "\t-p FILE\t palette file to use\n");
@@ -237,6 +241,7 @@ info(nuru_img_s *img)
 	fprintf(stdout, "mdata_mode: %d\n", img->mdata_mode);
 	fprintf(stdout, "cols:       %d\n", img->cols);
 	fprintf(stdout, "rows:       %d\n", img->rows);
+	fprintf(stdout, "ch_key:     %d\n", img->ch_key);
 	fprintf(stdout, "fg_key:     %d\n", img->fg_key);
 	fprintf(stdout, "bg_key:     %d\n", img->bg_key);
 	fprintf(stdout, "glyph_pal:  %s\n", img->glyph_pal);
@@ -262,7 +267,7 @@ main(int argc, char **argv)
 		return EXIT_SUCCESS;
 	}
 
-	if (opts.img_file == NULL)
+	if (opts.nui_file == NULL)
 	{
 		fprintf(stderr, "No image file given\n");
 		return EXIT_FAILURE;
@@ -270,9 +275,9 @@ main(int argc, char **argv)
 
 	// load nuru image file
 	nuru_img_s nui = { 0 };
-	if (nuru_img_load(&nui, opts.img_file) == -1)
+	if (nuru_img_load(&nui, opts.nui_file) == -1)
 	{
-		fprintf(stderr, "Error loading image file: %s\n", opts.img_file);
+		fprintf(stderr, "Error loading image file: %s\n", opts.nui_file);
 		return EXIT_FAILURE;
 	}
 
@@ -282,13 +287,13 @@ main(int argc, char **argv)
 		return EXIT_SUCCESS;
 	}
 
-	// load nuru palette file
+	// load nuru glyph palette file
 	nuru_pal_s nup = { 0 };
-	if (opts.pal_file)
+	if (opts.nug_file)
 	{
-		if (nuru_pal_load(&nup, opts.pal_file) == -1)
+		if (nuru_pal_load(&nup, opts.nug_file) == -1)
 		{
-			fprintf(stderr, "Error loading palette file: %s\n", opts.pal_file);
+			fprintf(stderr, "Error loading palette file: %s\n", opts.nug_file);
 			return EXIT_FAILURE;
 		}
 	}
@@ -318,7 +323,7 @@ main(int argc, char **argv)
 	// display nuru image
 	term_setup(&opts);
 	term_clear();
-	print_nui(&nui, opts.pal_file ? &nup : NULL, ws.ws_col, ws.ws_row);
+	print_nui(&nui, opts.nug_file ? &nup : NULL, ws.ws_col, ws.ws_row);
 
 	// clean up and cya 
 	nuru_img_free(&nui);

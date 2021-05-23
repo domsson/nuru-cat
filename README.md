@@ -1,6 +1,6 @@
-# nuru-view
+# nuru-cat
 
-Display [nuru images](https://github.com/domsson/nuru) on your Terminal.
+Display [nuru images](https://github.com/domsson/nuru) in your terminal.
 
 ## Status / Overview 
 
@@ -20,7 +20,7 @@ You can compile it with the provided `build` script.
 
 ## Usage
 
-    nuru-view [OPTIONS...] image-file
+    nuru-cat [OPTIONS...] image-file
 
 Options:
 
