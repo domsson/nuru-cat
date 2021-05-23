@@ -1,4 +1,4 @@
-# nuru-cat
+<img width="100%" src="nuru-cat.png" alt="nuru-cat">
 
 Display [nuru images](https://github.com/domsson/nuru) in your terminal.
 
