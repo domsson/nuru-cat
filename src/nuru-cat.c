@@ -4,6 +4,7 @@
 #include <stdio.h>      // fprintf(), stdout, setlinebuf()
 #include <stdlib.h>     // EXIT_SUCCESS, EXIT_FAILURE, rand()
 #include <stdint.h>     // uint8_t, uint16_t, ...
+#include <ctype.h>      // tolower()
 #include <inttypes.h>   // PRIu8, PRIu16, ...
 #include <unistd.h>     // getopt(), STDOUT_FILENO
 #include <math.h>       // ceil()
@@ -13,10 +14,12 @@
 #include <sys/ioctl.h>  // ioctl(), TIOCGWINSZ
 #include <locale.h>     // setlocale(), LC_CTYPE
 #include <wchar.h>      // fwide(), wchar_t
+#include <limits.h>     // PATH_MAX (don't hit me)
 #include "nuru.h"       // nuru minimal reference implementation
 
 // program information
 
+#define PROJECT_NAME "nuru"
 #define PROGRAM_NAME "nuru-cat"
 #define PROGRAM_URL  "https://github.com/domsson/nuru-cat"
 
@@ -38,7 +41,10 @@
 #define ANSI_CLEAR_SCREEN L"\x1b[2J"
 #define ANSI_CURSOR_RESET L"\x1b[H"
 
-// these are flags used for signal handling
+// nuru specific
+
+#define IMG_EXT "nui"
+#define PAL_EXT "nup"
 
 typedef struct options
 {
@@ -46,6 +52,7 @@ typedef struct options
 	char *nug_file;        // nuru glyph palette file to load
 	char *nuc_file;        // nuru color palette file to load
 	uint8_t info;          // print image info and exit
+	uint8_t clear;         // clear terminal before printing
 	uint8_t fg;            // custom foreground color
 	uint8_t bg;            // custom background color
 	uint8_t help : 1;      // show help and exit
@@ -61,7 +68,7 @@ parse_args(int argc, char **argv, options_s *opts)
 {
 	opterr = 0;
 	int o;
-	while ((o = getopt(argc, argv, "b:c:f:g:ihV")) != -1)
+	while ((o = getopt(argc, argv, "b:c:Cf:g:ihV")) != -1)
 	{
 		switch (o)
 		{
@@ -70,6 +77,9 @@ parse_args(int argc, char **argv, options_s *opts)
 				break;
 			case 'c':
 				opts->nuc_file = optarg;
+				break;
+			case 'C':
+				opts->clear = 1;
 				break;
 			case 'f':
 				opts->fg = 1;
@@ -167,9 +177,7 @@ term_setup(options_s *opts)
 {
 	fputws(ANSI_HIDE_CURSOR, stdout);
 
-	// TODO image's default BG color
 	//fputs(DEFAULT_BG, stdout);
-	// TODO image's default FG color
 	//fputws(DEFAULT_FG, stdout);
 	
 	term_echo(0);                      // don't show keyboard input
@@ -249,6 +257,31 @@ info(nuru_img_s *img)
 }
 
 int
+pal_path(char *buf, size_t len, const char *pal, const char *type)
+{
+	char *home = getenv("HOME");
+	char *config = getenv("XDG_CONFIG_HOME");
+
+	if (config)
+	{
+		return snprintf(buf, len, "%s/%s/%s/%s.%s", config, PROJECT_NAME, type, pal, PAL_EXT);
+	}
+	else
+	{
+		return snprintf(buf, len, "%s/%s/%s/%s/%s.%s", home, ".config", PROJECT_NAME, type, pal, PAL_EXT);
+	}
+}
+
+void
+make_lower(char *str)
+{
+	for (int i = 0; str[i]; ++i)
+	{
+		str[i] = tolower(str[i]);
+	}
+}
+
+int
 main(int argc, char **argv)
 {
 	// parse command line options
@@ -288,16 +321,57 @@ main(int argc, char **argv)
 	}
 
 	// load nuru glyph palette file
-	nuru_pal_s nup = { 0 };
+	nuru_pal_s nug = { 0 };
 	if (opts.nug_file)
 	{
-		if (nuru_pal_load(&nup, opts.nug_file) == -1)
+		if (nuru_pal_load(&nug, opts.nug_file) == -1)
 		{
 			fprintf(stderr, "Error loading palette file: %s\n", opts.nug_file);
 			return EXIT_FAILURE;
 		}
 	}
+	else if (nui.glyph_pal[0])
+	{
+		char pal_name[NURU_STR_LEN];
+		strcpy(pal_name, nui.glyph_pal);
+		make_lower(pal_name);
 
+		char glyph_pal[PATH_MAX];
+		pal_path(glyph_pal, PATH_MAX, pal_name, "glyphs");
+
+		if (nuru_pal_load(&nug, glyph_pal) == -1)
+		{
+			fprintf(stderr, "Error loading palette file: %s\n", glyph_pal);
+			return EXIT_FAILURE;
+		}
+	}
+
+	// load nuru color palette file
+	nuru_pal_s nuc = { 0 };
+	if (opts.nuc_file)
+	{
+		if (nuru_pal_load(&nuc, opts.nuc_file) == -1)
+		{
+			fprintf(stderr, "Error loading palette file: %s\n", opts.nuc_file);
+			return EXIT_FAILURE;
+		}
+	}
+	else if (nui.color_pal[0])
+	{
+		char pal_name[NURU_STR_LEN];
+		strcpy(pal_name, nui.color_pal);
+		make_lower(pal_name);
+
+		char color_pal[PATH_MAX];
+		pal_path(color_pal, PATH_MAX, pal_name, "colors");
+
+		if (nuru_pal_load(&nuc, color_pal) == -1)
+		{
+			fprintf(stderr, "Error loading palette file: %s\n", color_pal);
+			return EXIT_FAILURE;
+		}
+	}
+	
 	// get the terminal dimensions
 	struct winsize ws = { 0 };
 	if (term_wsize(&ws) == -1)
@@ -322,8 +396,8 @@ main(int argc, char **argv)
 
 	// display nuru image
 	term_setup(&opts);
-	term_clear();
-	print_nui(&nui, opts.nug_file ? &nup : NULL, ws.ws_col, ws.ws_row);
+	if (opts.clear) term_clear();
+	print_nui(&nui, nug.type ? &nug : NULL, ws.ws_col, ws.ws_row);
 
 	// clean up and cya 
 	nuru_img_free(&nui);
