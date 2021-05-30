@@ -129,6 +129,23 @@ version(FILE *where)
 			PROGRAM_URL);
 }
 
+void
+info(nuru_img_s *img)
+{
+	fprintf(stdout, "signature:  %s\n", img->signature);
+	fprintf(stdout, "version:    %d\n", img->version);
+	fprintf(stdout, "color_mode: %d\n", img->color_mode);
+	fprintf(stdout, "glpyh_mode: %d\n", img->glyph_mode);
+	fprintf(stdout, "mdata_mode: %d\n", img->mdata_mode);
+	fprintf(stdout, "cols:       %d\n", img->cols);
+	fprintf(stdout, "rows:       %d\n", img->rows);
+	fprintf(stdout, "ch_key:     %d\n", img->ch_key);
+	fprintf(stdout, "fg_key:     %d\n", img->fg_key);
+	fprintf(stdout, "bg_key:     %d\n", img->bg_key);
+	fprintf(stdout, "glyph_pal:  %s\n", img->glyph_pal);
+	fprintf(stdout, "color_pal:  %s\n", img->color_pal);
+}
+
 /*
  * Try to figure out the terminal size, in character cells, and return that 
  * info in the given winsize structure. Returns 0 on succes, -1 on error.
@@ -200,36 +217,66 @@ term_reset()
 }
 
 static void
-color_fg(uint8_t color)
+color_4bit(uint8_t color)
+{
+	// 0 =>  30, 1 =>  31, ...  7 =>  37
+	// 8 =>  90, 8 =>  91, ... 15 =>  97
+	color =  (color < 8 ? color + 30 : color + 82);
+	wprintf(L"\x1b[%hhum", color);
+}
+
+static void
+color_4bit_bg(uint8_t color)
+{
+	// 0 =>  40, 1 =>  41, ...  7 =>  47
+	// 8 => 100, 9 => 101, ... 15 => 107
+	color =  (color < 8 ? color + 30 : color + 82) + 10;
+	wprintf(L"\x1b[%hhum", color);
+}
+
+static void
+color_8bit_fg(uint8_t color)
 {
 	wprintf(L"\x1b[38;5;%hhum", color);
 }
 
 static void
-color_bg(uint8_t color)
+color_8bit_bg(uint8_t color)
 {
 	wprintf(L"\x1b[48;5;%hhum", color);
 }
 
+static void
+color_rgb_fg(uint8_t r, uint8_t g, uint8_t b)
+{
+	wprintf(L"\x1b[38;2;%hhu;%hhu;%hhum", r, g, b);
+}
+
+static void
+color_rgb_bg(uint8_t r, uint8_t g, uint8_t b)
+{
+	wprintf(L"\x1b[48;2;%hhu;%hhu;%hhum", r, g, b);
+}
+
 static int
-print_nui(nuru_img_s *img, nuru_pal_s *pal, uint16_t cols, uint16_t rows)
+print_nui(nuru_img_s *nui, nuru_pal_s *nug, nuru_pal_s *nuc, uint16_t cols, uint16_t rows)
 {
 	nuru_cell_s *cell = NULL;
 
-	for (uint16_t r = 0; r < img->rows; ++r)
+	for (uint16_t r = 0; r < nui->rows && r < rows; ++r)
 	{
-		for (uint16_t c = 0; c < img->cols; ++c)
+		for (uint16_t c = 0; c < nui->cols && c < cols; ++c)
 		{
-			cell = nuru_get_cell(img, c, r);
-			if (cell->fg != img->fg_key)
+			cell = nuru_get_cell(nui, c, r);
+			if (cell->fg != nui->fg_key)
 			{
-				color_fg(cell->fg);
+				color_8bit_fg(cell->fg);
 			}
-			if (cell->bg != img->bg_key)
+			if (cell->bg != nui->bg_key)
 			{
-				color_bg(cell->bg);
+				color_8bit_bg(cell->bg);
 			}
-			wchar_t ch = pal ? pal->codepoints[cell->ch] : cell->ch;
+			wchar_t ch = nug ? (wchar_t) nug->data.glyphs[cell->ch] : cell->ch;
 			fputwc(ch, stdout);
 			fputws(ANSI_FONT_RESET, stdout);
 		}	
@@ -240,20 +287,12 @@ print_nui(nuru_img_s *img, nuru_pal_s *pal, uint16_t cols, uint16_t rows)
 }
 
 void
-info(nuru_img_s *img)
+make_lower(char *str)
 {
-	fprintf(stdout, "signature:  %s\n", img->signature);
-	fprintf(stdout, "version:    %d\n", img->version);
-	fprintf(stdout, "color_mode: %d\n", img->color_mode);
-	fprintf(stdout, "glpyh_mode: %d\n", img->glyph_mode);
-	fprintf(stdout, "mdata_mode: %d\n", img->mdata_mode);
-	fprintf(stdout, "cols:       %d\n", img->cols);
-	fprintf(stdout, "rows:       %d\n", img->rows);
-	fprintf(stdout, "ch_key:     %d\n", img->ch_key);
-	fprintf(stdout, "fg_key:     %d\n", img->fg_key);
-	fprintf(stdout, "bg_key:     %d\n", img->bg_key);
-	fprintf(stdout, "glyph_pal:  %s\n", img->glyph_pal);
-	fprintf(stdout, "color_pal:  %s\n", img->color_pal);
+	for (int i = 0; str[i]; ++i)
+	{
+		str[i] = tolower(str[i]);
+	}
 }
 
 int
@@ -272,13 +311,20 @@ pal_path(char *buf, size_t len, const char *pal, const char *type)
 	}
 }
 
-void
-make_lower(char *str)
+int
+load_pal_by_name(nuru_pal_s *nup, const char *type, const char *name)
 {
-	for (int i = 0; str[i]; ++i)
-	{
-		str[i] = tolower(str[i]);
-	}
+	// make a copy of the name and lower-case it
+	char pal_name[NURU_STR_LEN];
+	strcpy(pal_name, name);
+	make_lower(pal_name);
+
+	// get the full path to the palette
+	char path[PATH_MAX];
+	pal_path(path, PATH_MAX, pal_name, type);
+
+	// load the palette
+	return nuru_pal_load(nup, path);
 }
 
 int
@@ -332,16 +378,9 @@ main(int argc, char **argv)
 	}
 	else if (nui.glyph_pal[0])
 	{
-		char pal_name[NURU_STR_LEN];
-		strcpy(pal_name, nui.glyph_pal);
-		make_lower(pal_name);
-
-		char glyph_pal[PATH_MAX];
-		pal_path(glyph_pal, PATH_MAX, pal_name, "glyphs");
-
-		if (nuru_pal_load(&nug, glyph_pal) == -1)
+		if (load_pal_by_name(&nug, "glyphs", nui.glyph_pal) == -1)
 		{
-			fprintf(stderr, "Error loading palette file: %s\n", glyph_pal);
+			fprintf(stderr, "Error loading palette: %s\n", nui.glyph_pal);
 			return EXIT_FAILURE;
 		}
 	}
@@ -358,16 +397,9 @@ main(int argc, char **argv)
 	}
 	else if (nui.color_pal[0])
 	{
-		char pal_name[NURU_STR_LEN];
-		strcpy(pal_name, nui.color_pal);
-		make_lower(pal_name);
-
-		char color_pal[PATH_MAX];
-		pal_path(color_pal, PATH_MAX, pal_name, "colors");
-
-		if (nuru_pal_load(&nuc, color_pal) == -1)
+		if (load_pal_by_name(&nuc, "colors", nui.color_pal) == -1)
 		{
-			fprintf(stderr, "Error loading palette file: %s\n", color_pal);
+			fprintf(stderr, "Error loading palette: %s\n", nui.color_pal);
 			return EXIT_FAILURE;
 		}
 	}
@@ -397,7 +429,7 @@ main(int argc, char **argv)
 	// display nuru image
 	term_setup(&opts);
 	if (opts.clear) term_clear();
-	print_nui(&nui, nug.type ? &nug : NULL, ws.ws_col, ws.ws_row);
+	print_nui(&nui, nug.type ? &nug : NULL, nuc.type ? &nuc : NULL, ws.ws_col, ws.ws_row);
 
 	// clean up and cya 
 	nuru_img_free(&nui);

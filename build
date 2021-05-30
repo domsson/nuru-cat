@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-gcc -Wall -Og -o bin/nuru-cat src/nuru-cat.c
+gcc -Wall -Og -g -o bin/nuru-cat src/nuru-cat.c
