@@ -5,11 +5,7 @@
 #include <stdlib.h>     // EXIT_SUCCESS, EXIT_FAILURE, rand()
 #include <stdint.h>     // uint8_t, uint16_t, ...
 #include <ctype.h>      // tolower()
-#include <inttypes.h>   // PRIu8, PRIu16, ...
 #include <unistd.h>     // getopt(), STDOUT_FILENO
-#include <math.h>       // ceil()
-#include <time.h>       // time(), nanosleep(), struct timespec
-#include <signal.h>     // sigaction(), struct sigaction
 #include <termios.h>    // struct winsize, struct termios, tcgetattr(), ...
 #include <sys/ioctl.h>  // ioctl(), TIOCGWINSZ
 #include <locale.h>     // setlocale(), LC_CTYPE
@@ -24,8 +20,8 @@
 #define PROGRAM_URL  "https://github.com/domsson/nuru-cat"
 
 #define PROGRAM_VER_MAJOR 0
-#define PROGRAM_VER_MINOR 0
-#define PROGRAM_VER_PATCH 1
+#define PROGRAM_VER_MINOR 1
+#define PROGRAM_VER_PATCH 0
 
 // ANSI escape codes
 // https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit
@@ -41,11 +37,6 @@
 #define ANSI_CLEAR_SCREEN L"\x1b[2J"
 #define ANSI_CURSOR_RESET L"\x1b[H"
 
-// nuru specific
-
-#define IMG_EXT "nui"
-#define PAL_EXT "nup"
-
 typedef struct options
 {
 	char *nui_file;        // nuru image file to load
@@ -53,8 +44,6 @@ typedef struct options
 	char *nuc_file;        // nuru color palette file to load
 	uint8_t info;          // print image info and exit
 	uint8_t clear;         // clear terminal before printing
-	uint8_t fg;            // custom foreground color
-	uint8_t bg;            // custom background color
 	uint8_t help : 1;      // show help and exit
 	uint8_t version : 1;   // show version and exit
 }
@@ -72,17 +61,11 @@ parse_args(int argc, char **argv, options_s *opts)
 	{
 		switch (o)
 		{
-			case 'b':
-				opts->bg = 1;
-				break;
 			case 'c':
 				opts->nuc_file = optarg;
 				break;
 			case 'C':
 				opts->clear = 1;
-				break;
-			case 'f':
-				opts->fg = 1;
 				break;
 			case 'g':
 				opts->nug_file = optarg;
@@ -113,8 +96,11 @@ help(const char *invocation, FILE *where)
 	fprintf(where, "USAGE\n");
 	fprintf(where, "\t%s [OPTIONS...] image_file\n\n", invocation);
 	fprintf(where, "OPTIONS\n");
+	fprintf(where, "\t-C\tclear the console before printing\n");
+	fprintf(where, "\t-c FILE\tpath to color palette file to use\n");
+	fprintf(where, "\t-g FILE\tpath to glyph palette file to use\n");
 	fprintf(where, "\t-h\tprint this help text and exit\n");
-	fprintf(where, "\t-p FILE\t palette file to use\n");
+	fprintf(where, "\t-i\tshow image information and exit\n");
 	fprintf(where, "\t-V\tprint version information and exit\n");
 }
 
@@ -129,6 +115,9 @@ version(FILE *where)
 			PROGRAM_URL);
 }
 
+/*
+ * Print nuru image header information.
+ */
 void
 info(nuru_img_s *img)
 {
@@ -177,7 +166,7 @@ term_echo(int on)
 }
 
 /*
- * Prepare the terminal for the next paint iteration.
+ * Clear the entire terminal and move the cursor back to the top left.
  */
 static void
 term_clear()
@@ -193,12 +182,8 @@ static void
 term_setup(options_s *opts)
 {
 	fputws(ANSI_HIDE_CURSOR, stdout);
-	
 	term_echo(0);                      // don't show keyboard input
-	
-	// set the buffering to fully buffered, we're adult and flush ourselves
-	//setvbuf(stdout, NULL, _IONBF, 0);
-	//setvbuf(stdout, NULL, _IOFBF, 0);
+	if (opts->clear) term_clear();     // if requested, clear terminal
 }
 
 /*
@@ -210,8 +195,6 @@ term_reset()
 	fputws(ANSI_FONT_RESET, stdout);   // resets font colors and effects
 	fputws(ANSI_SHOW_CURSOR, stdout);  // show the cursor again
 	term_echo(1);                      // show keyboard input
-
-	//setvbuf(stdout, NULL, _IOLBF, 0);
 }
 
 static void 
@@ -283,7 +266,7 @@ print_color_pal(nuru_cell_s *cell, uint8_t fg_key, uint8_t bg_key, nuru_pal_s* p
 static void
 print_glyph_none()
 {
-	wchar_t space = 32;
+	wchar_t space = NURU_SPACE;
 	fputwc(space, stdout);
 }
 
@@ -387,11 +370,24 @@ pal_path(char *buf, size_t len, const char *pal, const char *type)
 
 	if (config)
 	{
-		return snprintf(buf, len, "%s/%s/%s/%s.%s", config, PROJECT_NAME, type, pal, PAL_EXT);
+		return snprintf(buf, len, "%s/%s/%s/%s.%s", 
+				config, 
+				PROJECT_NAME, 
+				type, 
+				pal, 
+				NURU_PAL_FILEEXT
+		);
 	}
 	else
 	{
-		return snprintf(buf, len, "%s/%s/%s/%s/%s.%s", home, ".config", PROJECT_NAME, type, pal, PAL_EXT);
+		return snprintf(buf, len, "%s/%s/%s/%s/%s.%s", 
+				home, 
+				".config", 
+				PROJECT_NAME, 
+				type, 
+				pal, 
+				NURU_PAL_FILEEXT
+		);
 	}
 }
 
@@ -450,20 +446,22 @@ main(int argc, char **argv)
 		return EXIT_SUCCESS;
 	}
 
-	// load nuru glyph palette file
+	// figure out if the image needs palette files
+	uint8_t using_glyph_pal = (nui.glyph_mode & 128) && nui.glyph_pal[0];
+	uint8_t using_color_pal = (nui.color_mode & 128) && nui.color_pal[0];
+
+	// potentially load a glyph palette
 	nuru_pal_s nug = { 0 };
 	if (opts.nug_file)
 	{
-		fprintf(stderr, "Loading glyph palette...\n");
 		if (nuru_pal_load(&nug, opts.nug_file) == -1)
 		{
 			fprintf(stderr, "Error loading palette file: %s\n", opts.nug_file);
 			return EXIT_FAILURE;
 		}
 	}
-	else if (nui.glyph_pal[0])
+	else if (using_glyph_pal)
 	{
-		fprintf(stderr, "Loading glyph palette by name...\n");
 		if (load_pal_by_name(&nug, "glyphs", nui.glyph_pal) == -1)
 		{
 			fprintf(stderr, "Error loading palette: %s\n", nui.glyph_pal);
@@ -471,20 +469,18 @@ main(int argc, char **argv)
 		}
 	}
 
-	// load nuru color palette file
+	// potentially load a color palette
 	nuru_pal_s nuc = { 0 };
 	if (opts.nuc_file)
 	{
-		fprintf(stderr, "Loading color palette...\n");
 		if (nuru_pal_load(&nuc, opts.nuc_file) == -1)
 		{
 			fprintf(stderr, "Error loading palette file: %s\n", opts.nuc_file);
 			return EXIT_FAILURE;
 		}
 	}
-	else if (nui.color_pal[0])
+	else if (using_color_pal)
 	{
-		fprintf(stderr, "Loading color palette by name...\n");
 		if (load_pal_by_name(&nuc, "colors", nui.color_pal) == -1)
 		{
 			fprintf(stderr, "Error loading palette: %s\n", nui.color_pal);
@@ -516,8 +512,7 @@ main(int argc, char **argv)
 
 	// display nuru image
 	term_setup(&opts);
-	if (opts.clear) term_clear();
-	print_nui(&nui, nug.type ? &nug : NULL, nuc.type ? &nuc : NULL, ws.ws_col, ws.ws_row);
+	print_nui(&nui, &nug, &nuc, ws.ws_col, ws.ws_row);
 
 	// clean up and cya 
 	nuru_img_free(&nui);

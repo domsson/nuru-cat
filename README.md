@@ -24,10 +24,11 @@ You can compile it with the provided `build` script.
 
 Options:
 
-  - `-b`: custom background color (not yet implemented)
-  - `-f`: custom foreground color (not yet implemented)
+  - `-C`: clear the console before printing
+  - `-c FILE`: path to color palette file to use
+  - `-g FILE`: path to glyph palette file to use
   - `-h`: print help text and exit
-  - `-p FILE`: palette file to use
+  - `-i`: show image information and exit
   - `-V`: print version information and exit
 
 ## Support
