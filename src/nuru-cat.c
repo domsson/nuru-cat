@@ -193,13 +193,11 @@ static void
 term_setup(options_s *opts)
 {
 	fputws(ANSI_HIDE_CURSOR, stdout);
-
-	//fputs(DEFAULT_BG, stdout);
-	//fputws(DEFAULT_FG, stdout);
 	
 	term_echo(0);                      // don't show keyboard input
 	
 	// set the buffering to fully buffered, we're adult and flush ourselves
+	//setvbuf(stdout, NULL, _IONBF, 0);
 	//setvbuf(stdout, NULL, _IOFBF, 0);
 }
 
@@ -216,46 +214,111 @@ term_reset()
 	//setvbuf(stdout, NULL, _IOLBF, 0);
 }
 
-static void
-color_4bit(uint8_t color)
+static void 
+print_color_4bit(nuru_cell_s* cell, uint8_t fg_key, uint8_t bg_key)
 {
-	// 0 =>  30, 1 =>  31, ...  7 =>  37
-	// 8 =>  90, 8 =>  91, ... 15 =>  97
-	color =  (color < 8 ? color + 30 : color + 82);
-	wprintf(L"\x1b[%hhum", color);
+	if (cell->fg != fg_key)
+	{
+		// 0 =>  30, 1 =>  31, ...  7 =>  37
+		// 8 =>  90, 8 =>  91, ... 15 =>  97
+		uint8_t col = (cell->fg < 8 ? cell->fg + 30 : cell->fg + 82);
+		wprintf(L"\x1b[%hhum", col);
+	}
+	if (cell->bg != bg_key)
+	{
+		// 0 =>  40, 1 =>  41, ...  7 =>  47
+		// 8 => 100, 9 => 101, ... 15 => 107
+		uint8_t col = (cell->bg < 8 ? cell->bg + 30 : cell->bg + 82) + 10;
+		wprintf(L"\x1b[%hhum", col);
+	}
 }
 
 static void
-color_4bit_bg(uint8_t color)
+print_color_8bit(nuru_cell_s* cell, uint8_t fg_key, uint8_t bg_key)
 {
-	// 0 =>  40, 1 =>  41, ...  7 =>  47
-	// 8 => 100, 9 => 101, ... 15 => 107
-	color =  (color < 8 ? color + 30 : color + 82) + 10;
-	wprintf(L"\x1b[%hhum", color);
+	if (cell->fg != fg_key)
+	{
+		wprintf(L"\x1b[38;5;%hhum", cell->fg);
+	}
+	if (cell->bg != bg_key)
+	{
+		wprintf(L"\x1b[48;5;%hhum", cell->bg);
+	}
 }
 
 static void
-color_8bit_fg(uint8_t color)
+print_color_pal(nuru_cell_s *cell, uint8_t fg_key, uint8_t bg_key, nuru_pal_s* pal)
 {
-	wprintf(L"\x1b[38;5;%hhum", color);
+	if (cell->fg != fg_key)
+	{
+		if (pal->type == NURU_PAL_TYPE_COLOR_8BIT)
+		{
+			uint8_t col = nuru_pal_get_col_8bit(pal, cell->fg);
+			wprintf(L"\x1b[38;5;%hhum", col);
+		}
+
+		else if (pal->type == NURU_PAL_TYPE_COLOR_RGB)
+		{
+			nuru_rgb_s* rgb = nuru_pal_get_col_rgb(pal, cell->fg);
+			wprintf(L"\x1b[38;2;%hhu;%hhu;%hhum", rgb->r, rgb->g, rgb->b);
+		}
+	}
+
+	if (cell->bg != bg_key)
+	{
+		if (pal->type == NURU_PAL_TYPE_COLOR_8BIT)
+		{
+			uint8_t col = nuru_pal_get_col_8bit(pal, cell->bg);
+			wprintf(L"\x1b[48;5;%hhum", col);
+		}
+
+		else if (pal->type == NURU_PAL_TYPE_COLOR_RGB)
+		{
+			nuru_rgb_s* rgb = nuru_pal_get_col_rgb(pal, cell->bg);
+			wprintf(L"\x1b[48;2;%hhu;%hhu;%hhum", rgb->r, rgb->g, rgb->b);
+		}
+	}
 }
 
 static void
-color_8bit_bg(uint8_t color)
+print_glyph_none()
 {
-	wprintf(L"\x1b[48;5;%hhum", color);
+	wchar_t space = 32;
+	fputwc(space, stdout);
 }
 
 static void
-color_rgb_fg(uint8_t r, uint8_t g, uint8_t b)
+print_glyph_ascii(nuru_cell_s* cell, uint8_t ch_key)
 {
-	wprintf(L"\x1b[38;2;%hhu;%hhu;%hhum", r, g, b);
+	if (cell->ch == ch_key)
+	{
+		print_glyph_none();
+		return;
+	}
+	fputwc((wchar_t) cell->ch, stdout);
 }
 
 static void
-color_rgb_bg(uint8_t r, uint8_t g, uint8_t b)
+print_glyph_unicode(nuru_cell_s* cell, uint8_t ch_key)
 {
-	wprintf(L"\x1b[48;2;%hhu;%hhu;%hhum", r, g, b);
+	if (cell->ch == ch_key)
+	{
+		print_glyph_none();
+		return;
+	}
+	fputwc((wchar_t) cell->ch, stdout);
+}
+
+static void
+print_glyph_pal(nuru_cell_s* cell, uint8_t ch_key, nuru_pal_s* nug)
+{
+	if (cell->ch == ch_key)
+	{
+		print_glyph_none();
+		return;
+	}
+	wchar_t ch = nuru_pal_get_glyph(nug, cell->ch);
+	fputwc((wchar_t) ch, stdout);
 }
 
 static int
@@ -267,17 +330,38 @@ print_nui(nuru_img_s *nui, nuru_pal_s *nug, nuru_pal_s *nuc, uint16_t cols, uint
 	{
 		for (uint16_t c = 0; c < nui->cols && c < cols; ++c)
 		{
-			cell = nuru_get_cell(nui, c, r);
-			if (cell->fg != nui->fg_key)
+			cell = nuru_img_get_cell(nui, c, r);
+
+			switch (nui->color_mode)
 			{
-				color_8bit_fg(cell->fg);
+				case NURU_COLOR_MODE_NONE:
+					break;
+				case NURU_COLOR_MODE_4BIT:
+					print_color_4bit(cell, nui->fg_key, nui->bg_key);
+					break;
+				case NURU_COLOR_MODE_8BIT:
+					print_color_8bit(cell, nui->fg_key, nui->bg_key);
+					break;
+				case NURU_COLOR_MODE_PALETTE:
+					print_color_pal(cell, nui->fg_key, nui->bg_key, nuc);
+					break;	
 			}
-			if (cell->bg != nui->bg_key)
+
+			switch (nui->glyph_mode)
 			{
-				color_8bit_bg(cell->bg);
+				case NURU_GLYPH_MODE_NONE:
+					print_glyph_none();
+					break;
+				case NURU_GLYPH_MODE_ASCII:
+					print_glyph_ascii(cell, nui->ch_key);
+					break;
+				case NURU_GLYPH_MODE_UNICODE:
+					print_glyph_unicode(cell, nui->ch_key);
+					break;
+				case NURU_GLYPH_MODE_PALETTE:
+					print_glyph_pal(cell, nui->ch_key, nug);
+					break;
 			}
-			wchar_t ch = nug ? (wchar_t) nug->data.glyphs[cell->ch] : cell->ch;
-			fputwc(ch, stdout);
 			fputws(ANSI_FONT_RESET, stdout);
 		}	
 		fputwc('\n', stdout);
@@ -324,7 +408,7 @@ load_pal_by_name(nuru_pal_s *nup, const char *type, const char *name)
 	pal_path(path, PATH_MAX, pal_name, type);
 
 	// load the palette
-	return nuru_pal_load(nup, path);
+	return nuru_pal_load(nup, path) == 0 ? 0 : -1;
 }
 
 int
@@ -370,6 +454,7 @@ main(int argc, char **argv)
 	nuru_pal_s nug = { 0 };
 	if (opts.nug_file)
 	{
+		fprintf(stderr, "Loading glyph palette...\n");
 		if (nuru_pal_load(&nug, opts.nug_file) == -1)
 		{
 			fprintf(stderr, "Error loading palette file: %s\n", opts.nug_file);
@@ -378,6 +463,7 @@ main(int argc, char **argv)
 	}
 	else if (nui.glyph_pal[0])
 	{
+		fprintf(stderr, "Loading glyph palette by name...\n");
 		if (load_pal_by_name(&nug, "glyphs", nui.glyph_pal) == -1)
 		{
 			fprintf(stderr, "Error loading palette: %s\n", nui.glyph_pal);
@@ -389,6 +475,7 @@ main(int argc, char **argv)
 	nuru_pal_s nuc = { 0 };
 	if (opts.nuc_file)
 	{
+		fprintf(stderr, "Loading color palette...\n");
 		if (nuru_pal_load(&nuc, opts.nuc_file) == -1)
 		{
 			fprintf(stderr, "Error loading palette file: %s\n", opts.nuc_file);
@@ -397,6 +484,7 @@ main(int argc, char **argv)
 	}
 	else if (nui.color_pal[0])
 	{
+		fprintf(stderr, "Loading color palette by name...\n");
 		if (load_pal_by_name(&nuc, "colors", nui.color_pal) == -1)
 		{
 			fprintf(stderr, "Error loading palette: %s\n", nui.color_pal);
