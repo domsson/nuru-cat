@@ -18,6 +18,16 @@ You can compile it with the provided `build` script.
     chmod +x ./build
     ./build
 
+## Installing
+
+When asking nuru-cat to display images that use palettes, it will look for 
+those in `$XGD_CONFIG_HOME/glyphs` and `$XGD_CONFIG_HOME/colors` accordingly.
+Hence, consider copying the provided palettes there. Assuming `~/.config` to 
+be `$XGD_CONFIG_HOME`, that would be:
+
+    mkdir ~/.config/nuru
+    cp -r ./nup/* ~/.config/nuru
+
 ## Usage
 
     nuru-cat [OPTIONS...] image-file
